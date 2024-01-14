@@ -1,0 +1,11 @@
+name: Cleanup caches for branch
+on:
+  pull_request:
+    types:
+      - closed
+
+jobs:
+  cache-cleanup:
+    uses: Touchkin/reusable-workflows/.github/workflows/branch_cache_cleanup.yaml@main
+    secrets:
+      gh_pat: ${{ secrets.ACTIONS_CACHE_CLEANUP_PAT }}

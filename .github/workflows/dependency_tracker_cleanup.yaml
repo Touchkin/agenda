@@ -1,0 +1,10 @@
+name: Delete Dtrack Project On PR Close
+on:
+  pull_request:
+    types:
+      - closed
+jobs:
+  dependency-tracker-cleanup:
+    uses: Touchkin/reusable-workflows/.github/workflows/dependency_tracker_cleanup.yaml@main
+    secrets:
+      DEPENDENCY_TRACK_API_KEY: ${{ secrets.DEPENDENCY_TRACK_API_KEY }}

@@ -1,0 +1,103 @@
+---
+    name: Run Dependency Tracker
+    on:
+      push:
+        branches:
+          - master
+          - development
+      pull_request:
+        branches: [master]
+    jobs:
+      generate-sbom:
+        if: '! github.event.pull_request.draft'
+        runs-on:
+          - self-hosted
+          - linux
+          - x64
+          - sonarqube
+        permissions:
+          issues: write
+          contents: write
+          pull-requests: write
+        env:
+          DEPENDENCYTRACK_SERVER: http://localhost:9035
+        outputs:
+          DEPENDENCYTRACK_PROJECT_NAME: ${{ steps.extract-project-name.outputs.DEPENDENCYTRACK_PROJECT_NAME }}
+          DEPENDENCYTRACK_PROJECT_VERSION: ${{ steps.resolve-version-name.outputs.DEPENDENCYTRACK_PROJECT_VERSION  }}
+          SBOM_FILENAME: "${{ steps.resolve-version-name.outputs.DEPENDENCYTRACK_PROJECT_VERSION  }}-sbom"
+        steps:
+          - uses: actions/checkout@v3
+          - name: Display project path
+            run: pwd
+          - name: Cache node modules
+            uses: actions/cache@v3
+            env:
+              cache-name: cache-node-modules
+            with:
+              path: |
+                node_modules
+                */*/node_modules
+              key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          - name: Install node modules
+            run: npm i
+          - name: Extract project name
+            id: extract-project-name
+            run: |
+              result=${PWD##*/}
+              echo "DEPENDENCYTRACK_PROJECT_NAME=$result" >> $GITHUB_OUTPUT
+          - name: check cdxgen is installed
+            run: cdxgen --version
+          - name: Generate the SBOM
+            run: cyclonedx-npm --spec-version 1.2 --omit dev --output-file bom.json
+          - name: Check SBOM existence
+            run: ls | grep bom
+          - name: Resolve version name for upload
+            id: resolve-version-name
+            run: >
+              #Get the right version name based on the state of the listener event
+    
+              if [[ "${{ github.ref }}" == "refs/heads/master" ]]
+    
+              then
+                package="production"
+              elif [[ "${{ github.ref }}" == "refs/heads/development" ]]
+    
+              then
+                package="development"
+              elif [[ "${{ github.event_name }}" == "push" || "${{ github.event_name }}" == "pull_request" ]]
+    
+              then
+                package="pr-${{github.head_ref}}"
+              else
+                echo "Invalid branch or event type. Skipping SBOM generation."
+                exit 0
+              fi
+    
+              echo "DEPENDENCYTRACK_PROJECT_VERSION=$package" >> $GITHUB_OUTPUT
+          - name: Upload SBOM To Artifacts
+            uses: actions/upload-artifact@v3
+            with:
+              name: "${{ steps.resolve-version-name.outputs.DEPENDENCYTRACK_PROJECT_VERSION }}-sbom"
+              path: bom.json
+      process-sbom:
+        needs: [generate-sbom]
+        uses: Touchkin/reusable-workflows/.github/workflows/dependency_tracker_utility.yaml@main
+        permissions:
+          issues: write
+          contents: write
+          pull-requests: write
+        secrets:
+          DEPENDENCY_TRACK_API_KEY: ${{ secrets.DEPENDENCY_TRACK_API_KEY }}
+        with:
+          CRITICAL_LIMIT: 1
+          HIGH_LIMIT: 2
+          MEDIUM_LIMIT: 2
+          LOW_LIMIT: 4
+          UNASSIGNED_LIMIT: 2
+          TEAM_UUID: 8f3c2f29-ae1a-453a-bab5-7e036e5432cb
+          SLEEP_TIME: 10
+          POST_COMMENT: true
+          DEPENDENCYTRACK_PROJECT_NAME: ${{ needs.generate-sbom.outputs.DEPENDENCYTRACK_PROJECT_NAME }}
+          DEPENDENCYTRACK_PROJECT_VERSION: ${{ needs.generate-sbom.outputs.DEPENDENCYTRACK_PROJECT_VERSION }}
+          SBOM_FILENAME: ${{ needs.generate-sbom.outputs.SBOM_FILENAME }}
+    
